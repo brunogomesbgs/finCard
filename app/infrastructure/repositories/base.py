@@ -62,6 +62,9 @@ class UserRepository:
     async def list_all(self) -> List[UserDB]:
         return await UserDB.all().order_by("-created_at").all()
 
+    async def delete(self, user_id: uuid.UUID, using_db=None):
+        await UserDB.filter(id=user_id).using_db(using_db).delete()
+
 class OutboxRepository:
     async def create(self, event_type: str, payload: dict, using_db=None) -> OutboxEventDB:
         return await OutboxEventDB.create(

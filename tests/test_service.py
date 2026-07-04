@@ -156,3 +156,51 @@ async def test_admin_list_users():
     # Regular user should NOT be able to list users
     with pytest.raises(Exception, match="Unauthorized: Only admins can list users"):
         await user_service.list_users(UserRole.USER)
+
+@pytest.mark.asyncio
+async def test_admin_exclude_user_success():
+    user_service = UserService()
+    admin = await user_service.create_user(UserCreate(
+        email="admin_del@test.com",
+        name="Admin User",
+        password="password",
+        role=UserRole.ADMIN
+    ))
+    user = await user_service.create_user(UserCreate(
+        email="user_del@test.com",
+        name="Regular User",
+        password="password",
+        role=UserRole.USER
+    ))
+
+    # Admin should be able to exclude user
+    result = await user_service.exclude_user(user.id, admin.role)
+    assert result is True
+
+    # Verify Database
+    db_user = await UserDB.get_or_none(id=user.id)
+    assert db_user is None
+
+    # Verify Event Store
+    events = await EventStoreDB.filter(aggregate_id=user.id, event_type="UserExcluded").all()
+    assert len(events) == 1
+
+@pytest.mark.asyncio
+async def test_user_exclude_user_failure():
+    user_service = UserService()
+    user1 = await user_service.create_user(UserCreate(
+        email="user1_del@test.com",
+        name="User 1",
+        password="password",
+        role=UserRole.USER
+    ))
+    user2 = await user_service.create_user(UserCreate(
+        email="user2_del@test.com",
+        name="User 2",
+        password="password",
+        role=UserRole.USER
+    ))
+
+    # Regular user should NOT be able to exclude another user
+    with pytest.raises(Exception, match="Unauthorized: Only admins can exclude users"):
+        await user_service.exclude_user(user2.id, user1.role)

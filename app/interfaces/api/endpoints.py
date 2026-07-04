@@ -108,6 +108,21 @@ async def list_transactions(
         logger.error("api_list_transactions_failed", error=str(e), user_id=str(current_user.id))
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def exclude_user(
+    user_id: uuid.UUID,
+    current_user: UserDB = Depends(get_current_user),
+    user_service: UserService = Depends(UserService)
+):
+    try:
+        await user_service.exclude_user(user_id, current_user.role, current_user.id)
+        return None
+    except Exception as e:
+        logger.error("api_exclude_user_failed", error=str(e), user_id=str(user_id), actor_id=str(current_user.id))
+        if "Unauthorized" in str(e):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
 @router.get("/health")
 async def health_check():
     return {"status": "healthy"}

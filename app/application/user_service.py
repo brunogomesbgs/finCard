@@ -98,3 +98,22 @@ class UserService:
         if role != UserRole.ADMIN:
             raise Exception("Unauthorized: Only admins can list users")
         return await self.repo.list_all()
+
+    async def exclude_user(self, user_id: uuid.UUID, actor_role: UserRole, actor_id: Optional[uuid.UUID] = None):
+        if actor_role != UserRole.ADMIN:
+            raise Exception("Unauthorized: Only admins can exclude users")
+        
+        async with in_transaction() as conn:
+            await self.repo.delete(user_id, using_db=conn)
+            
+            await EventStore.append(
+                aggregate_type="User",
+                aggregate_id=user_id,
+                event_type="UserExcluded",
+                payload={},
+                actor_id=actor_id,
+                using_db=conn
+            )
+            
+            logger.info("user_excluded", user_id=str(user_id), actor_id=str(actor_id) if actor_id else None)
+            return True
