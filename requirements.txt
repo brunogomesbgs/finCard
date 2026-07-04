@@ -1,0 +1,16 @@
+fastapi
+tortoise-orm
+aerich
+asyncpg
+celery
+redis
+pydantic-settings
+httpx
+structlog
+python-json-logger
+respx
+pytest
+pytest-asyncio
+pytest-mock
+httptools
+uvicorn

@@ -1,0 +1,30 @@
+### Create Transaction (Static Sample - ID already used in README)
+# Note: If this ID was already processed, it will return the existing record (Idempotency)
+POST http://localhost:8000/transactions
+Content-Type: application/json
+X-Correlation-ID: 550e8400-e29b-41d4-a716-446655440000
+
+{
+  "transaction_id": "550e8400-e29b-41d4-a716-446655440000",
+  "amount": 130.50,
+  "currency": "BRL"
+}
+
+### Create Transaction (New Unique ID - Use this for new tests)
+POST http://localhost:8000/transactions
+Content-Type: application/json
+X-Correlation-ID: {{$uuid}}
+
+{
+  "transaction_id": "{{$uuid}}",
+  "amount": 120.50,
+  "currency": "USD"
+}
+
+###
+
+### Health Check
+GET http://localhost:8000/health
+Accept: application/json
+
+###

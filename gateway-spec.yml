@@ -1,0 +1,46 @@
+swagger: "2.0"
+info:
+  title: "Payment Gateway Mock"
+  version: "1.0.0"
+host: "mock-gateway:8080"
+schemes:
+  - "http"
+consumes:
+  - "application/json"
+produces:
+  - "application/json"
+paths:
+  /payments:
+    post:
+      summary: "Process a payment"
+      parameters:
+        - in: "body"
+          name: "body"
+          required: true
+          schema:
+            type: "object"
+            properties:
+              transaction_id:
+                type: "string"
+                example: "550e8400-e29b-41d4-a716-446655440000"
+              amount:
+                type: "number"
+                example: 150.50
+              currency:
+                type: "string"
+                example: "BRL"
+      responses:
+        200:
+          description: "Payment processed successfully"
+          schema:
+            type: "object"
+            properties:
+              status:
+                type: "string"
+                example: "success"
+              gateway_tid:
+                type: "string"
+                example: "gtid_98765"
+              id:
+                type: "string"
+                example: "pay_12345"

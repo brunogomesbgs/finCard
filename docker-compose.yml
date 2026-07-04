@@ -1,0 +1,85 @@
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=fincard
+      - POSTGRES_PASSWORD=fincard
+      - POSTGRES_DB=fincard
+    ports:
+      - "5432:5432"
+    networks:
+      - fincard-network
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    networks:
+      - fincard-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbitmq_management management_metrics_collection false -rabbitmq_server deprecated_features.permit.management_metrics_collection false -rabbitmq_server deprecated_features.permit.transient_nonexcl_queues true -rabbitmq_server deprecated_features.permit.global_qos true
+    networks:
+      - fincard-network
+
+  api:
+    build: .
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgres://fincard:fincard@db:5432/fincard
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - GATEWAY_URL=http://mock-gateway:8080
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+      - mock-gateway
+    networks:
+      - fincard-network
+
+  worker:
+    build: .
+    command: celery -A app.infrastructure.messaging.worker worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgres://fincard:fincard@db:5432/fincard
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - GATEWAY_URL=http://mock-gateway:8080
+    depends_on:
+      - db
+      - redis
+      - rabbitmq
+      - mock-gateway
+    networks:
+      - fincard-network
+
+  mock-gateway:
+    image: stoplight/prism:4
+    command: mock -h 0.0.0.0 -p 8080 -d --errors /spec/gateway-spec.yml
+    volumes:
+      - ./gateway-spec.yml:/spec/gateway-spec.yml
+    ports:
+      - "8081:8080"
+    networks:
+      - fincard-network
+
+networks:
+  fincard-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
