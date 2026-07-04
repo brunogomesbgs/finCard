@@ -1,6 +1,43 @@
 # finCard
 
-Financial Microservice for high-reliability transaction processing.
+Financial Microservice for high-reliability transaction processing with CQRS and Event Sourcing.
+
+## Architecture
+
+This project follows a modern architecture focused on reliability, auditability, and scalability:
+
+- **CQRS (Command Query Responsibility Segregation):** Separation of write operations (Commands) and read operations (Queries) to optimize performance and scalability.
+- **Event Sourcing:** All state changes are stored as a sequence of immutable events in the `event_store`. The current state (Read Model) is a projection of these events.
+- **Repository Pattern:** Abstracted database access layer for better testability and separation of concerns.
+- **TCC (Try-Confirm-Cancel) Pattern:** Distributed consistency managed through explicit phases (Try: create record, Confirm: external gateway call, Cancel: mark as failure on error).
+- **Outbox Pattern (Decoupled):** Ensures reliable message delivery to RabbitMQ. Polling is handled by a background Celery Beat worker to reduce API latency.
+- **Dead Letter Queues (DLQ):** RabbitMQ configured with DLQs to handle and audit failed message deliveries.
+- **JWT Authentication:** Secure access control with Role-Based Access Control (RBAC) for `USER` and `ADMIN` roles. Handles high-security password hashing with SHA-256 pre-hashing for bcrypt compatibility.
+- **FastAPI:** High-performance asynchronous web framework.
+- **TortoiseORM:** Async ORM with PostgreSQL backend.
+- **Celery + RabbitMQ:** Background task processing for outbox events and decoupled polling.
+- **Redis:** Distributed locking for transaction idempotency.
+- **Self-Healing Database:** Automatic schema migration and maintenance during startup.
+
+## Database Schema (Event Store)
+
+The `event_store` table is the source of truth for all domain changes:
+
+| Column | Type | Description |
+| :--- | :--- | :--- |
+| `id` | `uuid` | Unique event identifier. |
+| `aggregate_type` | `varchar(50)` | The type of the aggregate (e.g., "User", "Transaction"). |
+| `aggregate_id` | `uuid` | The unique ID of the aggregate. |
+| `event_type` | `varchar(100)` | The type of event (e.g., "UserCreated", "TransactionProcessed"). |
+| `payload` | `jsonb` | The data associated with the event. |
+| `payload_version` | `smallint` | Version of the payload schema. |
+| `occurred_at` | `timestamptz` | When the event actually happened. |
+| `recorded_at` | `timestamptz` | When the event was recorded in the database. |
+| `sequence` | `bigint` | Ordered sequence for the aggregate events. |
+| `actor_id` | `uuid` | The ID of the user/system that performed the action. |
+| `actor_type` | `varchar(20)` | Type of the actor ("USER", "SYSTEM"). |
+| `correlation_id` | `uuid` | ID to trace requests across multiple services. |
+| `is_anonymized` | `boolean` | Flag for data privacy compliance. |
 
 ## Prerequisites
 
@@ -22,19 +59,52 @@ The application will be available at:
 
 ### Initialization
 
-The application automatically generates the database schema on startup via TortoiseORM (`generate_schemas=True`).
+The application automatically generates the database schema on startup via TortoiseORM. It also includes a self-healing mechanism to ensure legacy tables are updated to the latest schema requirements.
+
+## Authentication & Authorization
+
+All transaction endpoints require a valid JWT token.
+
+### User Roles
+- **USER:** Can create transactions, list their own transactions, and update their profile.
+- **ADMIN:** Can list all transactions and list all users in the system.
+
+### Auth Flows
+
+1.  **Register:** `POST /users` (Create user with `email`, `name`, `password` [min 6 chars], `role`).
+2.  **Login:** `POST /token` (Standard OAuth2 password flow).
+3.  **Update Password:** `PUT /users/password` (Requires current password and new password).
+4.  **Update Profile:** `PUT /users/me` (Change name or email).
+5.  **List Users:** `GET /users` (ADMIN only).
 
 ## Verifying the Application
 
-### Important: Idempotency
-This service implements **Idempotency**. If you send a request with a `transaction_id` that has already been processed, the system will return the **original record** from the database, even if you change other fields (like amount or currency). To process a new transaction, you must use a new, unique UUID.
+### 1. Create a User
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/users' \
+  -H 'Content-Type: application/json' \
+  -d '{
+  "email": "user@example.com",
+  "name": "John Doe",
+  "password": "securepassword123",
+  "role": "USER"
+}'
+```
 
-You can test the transaction endpoint using `curl`:
+### 2. Login
+```bash
+TOKEN=$(curl -s -X 'POST' \
+  'http://localhost:8000/token' \
+  -d 'username=user@example.com&password=securepassword123' \
+  | jq -r .access_token)
+```
 
+### 3. Create Transaction
 ```bash
 curl -X 'POST' \
   'http://localhost:8000/transactions' \
-  -H 'accept: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
   "transaction_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -43,10 +113,16 @@ curl -X 'POST' \
 }'
 ```
 
-Check the health of the service:
-```bash
-curl http://localhost:8000/health
-```
+### Idempotency
+This service implements **Idempotency**. If you send a request with a `transaction_id` that has already been processed, the system will return the **original record**. To process a new transaction, you must use a new, unique UUID.
+
+## Verifying the Architecture
+
+1.  **Repository Pattern:** Check `app/infrastructure/repositories/base.py` for abstracted DB access.
+2.  **TCC Flow:** Review `app/application/service.py` `process_transaction` method for Try/Confirm/Cancel logic.
+3.  **Decoupled Outbox:** Observe that `app/interfaces/api/endpoints.py` no longer calls the publisher synchronously. Polling is now in `app/infrastructure/messaging/tasks.py` and scheduled in `app/infrastructure/messaging/worker.py`.
+4.  **DLQ:** Check `app/infrastructure/messaging/worker.py` for RabbitMQ queue arguments defining the Dead Letter Exchange.
+5.  **CQRS & ES:** Verify `event_store` table and Event Sourcing logic in `app/application/events/store.py`.
 
 ## Running Tests
 
@@ -55,45 +131,3 @@ To run the tests inside the container environment:
 ```bash
 docker compose run api env PYTHONPATH=. pytest
 ```
-
-### "ModuleNotFoundError: No module named 'distutils'"
-If you see this error, it's because the old Python-based `docker-compose` (V1) is incompatible with Python 3.12.
-
-**The Solution:** Use the modern Docker Compose V2 (included with Docker Desktop and modern Docker Engine), which is a plugin and doesn't depend on Python.
-
-Use:
-```bash
-docker compose up --build
-```
-(Note the space instead of the hyphen).
-
-### Summary of fixes:
-
-1. **Use `docker compose` (V2):** Always prefer `docker compose` over `docker-compose`. V2 is written in Go and avoids all Python dependency issues.
-2. **Explicit Network:** We have updated `docker-compose.yml` to use an explicit bridge network, as newer Docker versions can sometimes fail to auto-create default networks in specific environments.
-3. **Command Syntax:**
-   - Correct: `docker compose up`
-   - Deprecated: `docker-compose up`
-4. **Port Conflicts:** If you get "port already allocated" errors, try cleaning up existing containers:
-   ```bash
-   docker compose down
-   docker compose up -d --force-recreate
-   ```
-5. **Variable Resolution:** Docker 29 is stricter about environment variables. If you use a `.env` file, ensure it is passed correctly:
-   ```bash
-   docker compose --env-file .env up -d
-   ```
-
-## Architecture
-
-- **FastAPI:** Web framework with asynchronous support.
-- **TortoiseORM:** Async ORM with PostgreSQL backend.
-- **Celery + RabbitMQ:** Reliable background task processing for the Outbox pattern.
-- **Redis:** Distributed locking for idempotency.
-- **Prism (Mock Gateway):** Simulates the external payment gateway.
-
-## Future Improvements: Reliability & Distributed Consistency
-
-- **Try-Confirm-Cancel (TCC) Pattern:** Explore implementation of the TCC pattern for gateway interactions to ensure distributed consistency between the local database and external providers.
-- **Change Data Capture (CDC):** Transition from a Celery-based outbox poller to a dedicated log tailing service (e.g., Debezium) that reads the PostgreSQL Write-Ahead Log (WAL) to guarantee delivery with lower database overhead.
-- **Dead Letter Queues (DLQ):** Implement robust DLQ handling and automated retry mechanisms in RabbitMQ to manage failed event deliveries and enable easier manual interventions.

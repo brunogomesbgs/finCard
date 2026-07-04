@@ -14,3 +14,9 @@ pytest-asyncio
 pytest-mock
 httptools
 uvicorn
+python-jose[cryptography]
+bcrypt==3.2.2
+passlib[bcrypt]
+
+python-multipart
+pyjwt

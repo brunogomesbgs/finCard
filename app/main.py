@@ -32,3 +32,16 @@ register_tortoise(
     generate_schemas=True,
     add_exception_handlers=True,
 )
+
+@app.on_event("startup")
+async def startup_db_fix():
+    from tortoise import connections
+    conn = connections.get("default")
+    try:
+        # Check if user_id exists in transactions
+        res = await conn.execute_query_dict("SELECT column_name FROM information_schema.columns WHERE table_name='transactions' AND column_name='user_id'")
+        if not res:
+            print("Fixing schema: Adding user_id to transactions")
+            await conn.execute_script('ALTER TABLE "transactions" ADD COLUMN "user_id" UUID;')
+    except Exception as e:
+        print(f"Startup DB fix error: {e}")
